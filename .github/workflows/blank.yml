@@ -1,0 +1,58 @@
+name: Burst 100 PRs in ~10 minutes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: burst-prs
+  cancel-in-progress: false
+
+jobs:
+  make-prs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup git author
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+
+      - name: Create 100 branches, commits, PRs with ~6s spacing
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO:  ${{ github.repository }}
+          BASE:  ${{ github.event.repository.default_branch }}
+        run: |
+          mkdir -p pr_logs
+          COUNT=100
+          INTERVAL=6   # секунд между PR
+          for i in $(seq 1 "$COUNT"); do
+            BR="auto/pr-$i"
+            # создаём ветку от дефолтной
+            git checkout -B "$BR" "origin/$BASE"
+            echo "$(date -u +'%Y-%m-%d %H:%M:%S UTC') PR #$i" >> "pr_logs/entry-$i.txt"
+            git add pr_logs/entry-$i.txt
+            git commit -m "chore: add pr_logs/entry-$i.txt"
+            git push -u origin "$BR"
+
+            # создаём PR
+            gh_api="https://api.github.com/repos/$REPO/pulls"
+            body=$(jq -n --arg t "Auto PR #$i" --arg h "$BR" --arg b "$BASE" --arg d "Automated PR $i" \
+                     '{title:$t, head:$h, base:$b, body:$d, draft:false}')
+            curl -sS -X POST \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              -d "$body" "$gh_api" | jq -r '.number // "ERR"' || true
+
+            # равномерное распределение
+            sleep "$INTERVAL"
+          done
