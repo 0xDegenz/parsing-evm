@@ -1,0 +1,38 @@
+name: auto-commit
+
+on:
+  schedule:
+    # каждые 30 минут; измените при необходимости
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}  # ручной запуск из Actions
+
+permissions:
+  contents: write
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # будем пушить своим токеном
+      - name: Config git author as your account
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+      - name: Update heartbeat file
+        run: |
+          FILE="heartbeat.txt"
+          DATE="$(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "$DATE" >> "$FILE"
+          # Страховка: если ничего не изменилось, коммита не будет
+          git add "$FILE"
+          git commit -m "chore: heartbeat $DATE" || echo "No changes"
+      - name: Push
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="${GITHUB_REF_NAME:-main}"
+          git remote set-url origin "https://x-access-token:${TOKEN}@github.com/${{ github.repository }}.git"
+          git push origin "HEAD:${BRANCH}"
